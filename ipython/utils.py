@@ -169,7 +169,7 @@ def append_image_data(class_name, image_dir, csv_in, csv_out=None):
     print 'Wrote data for {} images to csv.'.format(imageData.shape[0])
 
 
-def import_image_data(csv_in):
+def import_image_data(csv_in, display=False):
     """
     This function reads image data from a csv file and returns Numpy
     arrays containing the image features and the image labels so that
@@ -177,6 +177,7 @@ def import_image_data(csv_in):
     we can go back and forth between class string labels and integer
     encodings.
     :param csv_in: Path of csv file containing image data
+    :param display: Print out updates
     :returns: Image feature vectors, image labels, and label encoder
     """
     # Loading image data from csv
@@ -193,13 +194,16 @@ def import_image_data(csv_in):
     le = preprocessing.LabelEncoder()
     # roof = 0, water = 2, vegetation = 1
     le.fit(labels)
-    print le.classes_ # displays the set of classes
+    if display:
+        print le.classes_ # displays the set of classes
     labels = le.transform(labels)
-    print 'Got class labels for {} training data points.'.format\
-          (labels.shape[0])
+    if display:
+        print 'Got class labels for {} training data points.'.format\
+              (labels.shape[0])
     # Get color histograms
     bins = ['hist' + str(i+1) for i in range(48)]
     hists = imageData.as_matrix(columns=bins)
-    print 'Got feature vector for {} training data points.'.format\
-          (hists.shape[0])
+    if display:
+        print 'Got feature vector for {} training data points.'.format\
+              (hists.shape[0])
     return (hists, labels, le)
