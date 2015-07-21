@@ -5,6 +5,21 @@ import os
 import time
 import pandas as pd
 from sklearn import preprocessing
+from PIL import Image
+import matplotlib.pyplot as plt
+
+
+def display_image(imageFn):
+    """
+    This function loads an image and displays it in true color.
+    :param imageFn: Filename of the image
+    """
+    image = Image.open(imageFn)
+    convertedImage = image.convert('P')
+    plt.figure()
+    plt.imshow(convertedImage)
+    plt.show()
+
 
 def match_template(imageFn, templateFn, method=cv2.TM_SQDIFF_NORMED):
     """

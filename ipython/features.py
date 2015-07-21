@@ -67,9 +67,9 @@ def compute_gradient(channel):
     :returns: Magnitude and direction arrays of the same dimensions as the
     input channel of the image patch
     """
-    # Convolution kernels
+    # Convolution kernels, directions will start from 0 at x-axis going counterclockwise (standard)
     horiz_kernel = np.array([[1, 0, -1]])
-    vert_kernel = np.array([[1], [0], [-1]])
+    vert_kernel = np.array([[-1], [0], [1]])
     
     # Compute horizontal and vertical components of gradient
     horiz = filters.convolve(channel, horiz_kernel, mode='reflect')
@@ -83,8 +83,8 @@ def compute_gradient(channel):
     for i in range(channel.shape[0]):
         for j in range(channel.shape[1]):
             magnitude[i,j], direction[i,j] = cart2pol(horiz[i,j], vert[i,j])
-            # Converting angles to degrees and taking absolute value
-            direction[i,j] = abs(np.rad2deg(direction[i,j]))
+            # Converting angles to degrees and taking modulo 180
+            direction[i,j] = np.rad2deg(direction[i,j]) % 180
     
     # Return computed gradient
     return (magnitude, direction)
@@ -95,7 +95,7 @@ def compute_hog(image_patch, normalize=True):
     This function takes an image patch as input and returns a 9-element
     vector containing the histogram of oriented gradients.
     :param image_patch: The image patch on which to compute the HOG
-    :returns: The HOG feature vector and the edges of the bins
+    :returns: The HOG feature vector, the edges of the bins, and the max magnitude array
     """
     # Converting to signed integer
     image_patch = image_patch.astype(np.int_)
@@ -122,23 +122,28 @@ def compute_hog(image_patch, normalize=True):
     else:
         max_magnitude, max_direction = compute_gradient(image_patch)
     
-    
     # Computing simple histogram of gradients
-    hist, bin_edges = np.histogram(max_direction, bins=9, range=(0,180),\
+    hog, hog_bins = np.histogram(max_direction, bins=9, range=(0,180),\
                                      weights=max_magnitude, density=False)
     if normalize:
-        hist = hist / sum(hist)
-    return (hist, bin_edges)
+        hog = hog.astype(float) / sum(hog)
+
+    # Computing histogram of gradient magnitudes
+    magnitude_hist, magnitude_bins = np.histogram(max_magnitude, bins=16, range=(0,256))
+    if normalize:
+        magnitude_hist = magnitude_hist.astype(float) / sum(magnitude_hist)
+
+    return (hog, hog_bins, magnitude_hist, magnitude_bins, max_magnitude)
 
 
-def plot_hog(hist, bin_edges):
+def plot_hist(hist, bin_edges, title='Histogram'):
     """
-    This function plots the Histogram of Oriented Gradients.
-    :param hist: The HOG vector
-    :param bin_edges: The HOG bin edge values
+    This function plots a histogram.
+    :param hist: The histogram vector
+    :param bin_edges: The histogram bin edge values
     """
-    plt.bar(bin_edges[:-1], hist, width=20)
-    plt.title('Simple HOG')
-    plt.xlabel('Direction bins')
+    plt.bar(bin_edges[:-1], hist, width=(bin_edges[1] - bin_edges[0]))
+    plt.title(title)
+    plt.xlabel('Bins')
     plt.ylabel('Frequency')
     plt.show()
