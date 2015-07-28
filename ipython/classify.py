@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 from sklearn import neighbors
+from sklearn import svm
 from PIL import Image
 from skimage.measure import label
 import glob
@@ -81,7 +82,34 @@ def get_training_data(image_data_fn, use_color=True, use_hog=True,
     return (train_data, train_labels, label_encoder)
 
 
-def get_color_vector(image, centroid, color_rad):
+def get_image_patch(image, centroid, radius, best=True):
+	"""
+	This function returns an image patch from an image given a center
+	pixel value and a radius. If best is True, then it returns the biggest
+	possible image patch that is still within the confines of the image.
+	:param image: Input image
+    :param centroid: Centroid of candidate
+    :param radius: Radius of image patch
+    :param best: If False, only returns patch if full patch is within image
+	"""
+	row = centroid[0]
+	col = centroid[1]
+	# Get candidate patch
+	x_min = max(0, (row - radius))
+	x_max = min((image.shape[0] - 1), (row + radius + 1))
+	y_min = max(0, (col - radius))
+	y_max = min((image.shape[1] - 1), (col + radius + 1))
+	patch = image[x_min:x_max, y_min:y_max, :]
+	# If best is True, return the best effort image patch, if not, return None
+	if best:
+		return patch
+	else:
+		if (patch.shape[0] == 2 * radius + 1) and (patch.shape[1] == 2 * radius + 1):
+			return patch
+		else:
+			return None
+
+def get_color_vector(image, centroid, color_rad=15):
     """
     This functions gets the color histogram vector for a candidate in an
     image.
@@ -90,19 +118,12 @@ def get_color_vector(image, centroid, color_rad):
     :param color_rad: Radius for computing color histogram
     :returns: Color histogram vector (1x48)
     """
-    row = centroid[0]
-    col = centroid[1]
-    # Get candidate patch
-    x_min = max(0, (row - color_rad))
-    x_max = min((image.shape[0] - 1), (row + color_rad + 1))
-    y_min = max(0, (col - color_rad))
-    y_max = min((image.shape[1] - 1), (col + color_rad + 1))
-    patch = image[x_min:x_max, y_min:y_max, :]
+    patch = get_image_patch(image, centroid, color_rad)
     # Return color histogram vector
     return calc_color_hist(patch).flatten()
 
 
-def get_hog_vector(image, centroid, hog_rad):
+def get_hog_vector(image, centroid, hog_rad=32):
     """
     This functions gets the color histogram vector for a candidate in an
     image.
@@ -111,14 +132,7 @@ def get_hog_vector(image, centroid, hog_rad):
     :param hog_rad: Radius for computing hog features
     :returns: HOG vector (1x9) and gradient magnitude vector (1x16)
     """
-    row = centroid[0]
-    col = centroid[1]
-    # Get candidate patch
-    x_min = max(0, (row - hog_rad))
-    x_max = min((image.shape[0] - 1), (row + hog_rad + 1))
-    y_min = max(0, (col - hog_rad))
-    y_max = min((image.shape[1] - 1), (col + hog_rad + 1))
-    patch = image[x_min:x_max, y_min:y_max, :]
+    patch = get_image_patch(image, centroid, hog_rad)
     # Return color histogram vector
     (hog, hog_bins, magnitude_hist, magnitude_bins, max_magnitude) = \
                 compute_hog(patch)
@@ -126,7 +140,7 @@ def get_hog_vector(image, centroid, hog_rad):
 
 
 def get_test_data(image_fn, centroids, use_color=True, use_hog=True,
-                  use_mag=True, color_rad=15, hog_rad=30):
+                  use_mag=True, color_rad=15, hog_rad=32):
     """
     This function gets the right candidate features for the classifier
     that we want to use.
@@ -210,7 +224,7 @@ def get_test_data(image_fn, centroids, use_color=True, use_hog=True,
 
 
 def classify_candidates(train_data, train_labels, test_data,
-                        label_encoder, k=3):
+                        label_encoder, classifier='knn', k=3):
     """
     This function classifies all candidate roofs within an image and
     returns the predicted labels and classification probabilities.
@@ -218,18 +232,29 @@ def classify_candidates(train_data, train_labels, test_data,
     :param train_labels: Training labels
     :param test_data: Test data
     :param label_encoder: Encoder to convert class predictions to labels
+    :param classifier: Type of classifier to use, default is knn
     :param neighbors: Number of neighbors for knn classifier
     :returns: Predicted labels and classification probabilities
     """
-    # Create and fit a nearest neighbors classifier
-    knn = neighbors.KNeighborsClassifier(n_neighbors=k)
-    # Train on training observations
-    knn.fit(train_data, train_labels)
-    # Predict labels for test set
-    predictions = knn.predict(test_data)
-    labels = label_encoder.inverse_transform(predictions)
-    probs = knn.predict_proba(test_data)
-    
+    if classifier == 'knn':
+	    # Create and fit a nearest neighbors classifier
+	    knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+	    # Train on training observations
+	    knn.fit(train_data, train_labels)
+	    # Predict labels for test set
+	    predictions = knn.predict(test_data)
+	    labels = label_encoder.inverse_transform(predictions)
+	    probs = knn.predict_proba(test_data)
+	else:
+		# Create and fit svm
+		svc = svm.SVC(kernel='linear')
+		# Train on training observations
+		svc.fit(train_data, train_labels)
+		# Predict labels for test set
+		predictions = svc.predict(test_data)
+		labels = label_encoder.inverse_transform(predictions)
+		probs = None
+
     return (predictions, labels, probs)
 
 
@@ -245,8 +270,8 @@ def annotate_results(image_fn, centroids, predictions, labels):
     """
     # Load satellite image for annotation
     image = cv2.imread(image_fn)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    text_color = [(255,0,255), (0,0,255), (0,255,0), (255,0,0)]
+    font = cv2.FONT_HERSHEY_TRIPLEX
+    text_color = [(255,0,255), (0,0,255), (0,255,0), (255,0,0), (0,255,255)]
     
     # Annotate image for writing to output
     for i in range(centroids.shape[0]):
@@ -262,9 +287,9 @@ def annotate_results(image_fn, centroids, predictions, labels):
     return image
 
 
-def classify_image(image_fn, template_fn, image_data_fn, out_fn,
+def classify_image(image_fn, template_fn, image_data_fn, out_fn=None,
                    use_color=True, use_hog=True, use_mag=True,
-                   thresh=0.05, color_rad=15, hog_rad=30, k=3,
+                   thresh=0.05, color_rad=15, hog_rad=32, k=3,
                    display=False):
     """
     This function classifies all candidate roofs within an image and
@@ -322,7 +347,7 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn,
             # Load image for display
             converted_image = Image.open(image_fn).convert('P')
             # Colors and weights for each class
-            colors = ['m', 'r', 'g', 'b']
+            colors = ['m', 'r', 'g', 'b', 'c']
             weights = ['normal', 'bold', 'normal', 'normal']
             # Annotate plot for display
             plt.figure()
@@ -344,6 +369,8 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn,
         labels = None
         probs = None
         if display:
+        	# Load image for display
+            converted_image = Image.open(image_fn).convert('P')
             plt.figure()
             plt.imshow(converted_image)
             plt.show()
@@ -351,14 +378,15 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn,
         image = cv2.imread(image_fn)
     
     # Write output image
-    cv2.imwrite(out_fn, image)
+    if out_fn is not None:
+	    cv2.imwrite(out_fn, image)
     
     return (centroids, labels, probs)
 
 
 def batch_classify(in_dir, out_dir, template_fn, image_data_fn,
                    use_color=True, use_hog=True, use_mag=True,
-                   thresh=0.05, color_rad=15, hog_rad=30, k=3):
+                   thresh=0.05, color_rad=15, hog_rad=32, k=3):
     """
     This function classifies all images in the input directory and
     saves annotated output images in the output directory.

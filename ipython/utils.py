@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn import preprocessing
 from PIL import Image
 import matplotlib.pyplot as plt
+from features import *
 
 
 def display_image(imageFn):
@@ -288,7 +289,7 @@ def store_image_data(image_dir, csv_out):
     :param image_dir: Path to the directory containing image samples
     :param csv_out: Path of output csv file containing data
     """
-    start_time = time()
+    start_time = time.time()
     
     # Setting column names of dataframe
     columns = ['class', 'imageID', 'filename', 'width', 'height']
@@ -303,7 +304,7 @@ def store_image_data(image_dir, csv_out):
     count_total = 0
     
     # Search sample directory for all sample class subdirectories
-    for class_dir in glob.iglob(sample_dir + '*'):
+    for class_dir in glob.iglob(image_dir + '*'):
         # Get class name
         class_name = os.path.basename(class_dir)
         # Add data for each image in class subdirectory
@@ -324,7 +325,7 @@ def store_image_data(image_dir, csv_out):
     image_data = image_data[columns]
     # Writing image data to csv
     image_data.to_csv(csv_out)
-    end_time = time()
+    end_time = time.time()
     print 'Processed {} images total in {} seconds.'.format(count_total,\
                                                 (end_time - start_time))
 
