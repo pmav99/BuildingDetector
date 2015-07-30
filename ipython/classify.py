@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
-from sklearn import neighbors
-from sklearn import svm
+from sklearn import neighbors, svm, ensemble
 from PIL import Image
 from skimage.measure import label
 import glob
@@ -224,28 +223,29 @@ def get_test_data(image_fn, centroids, use_color=True, use_hog=True,
 
 
 def classify_candidates(train_data, train_labels, test_data,
-                        label_encoder, classifier='knn', k=3):
-    """
-    This function classifies all candidate roofs within an image and
-    returns the predicted labels and classification probabilities.
-    :param train_data: Training data
-    :param train_labels: Training labels
-    :param test_data: Test data
-    :param label_encoder: Encoder to convert class predictions to labels
-    :param classifier: Type of classifier to use, default is knn
-    :param neighbors: Number of neighbors for knn classifier
-    :returns: Predicted labels and classification probabilities
-    """
-    if classifier == 'knn':
-	    # Create and fit a nearest neighbors classifier
-	    knn = neighbors.KNeighborsClassifier(n_neighbors=k)
-	    # Train on training observations
-	    knn.fit(train_data, train_labels)
-	    # Predict labels for test set
-	    predictions = knn.predict(test_data)
-	    labels = label_encoder.inverse_transform(predictions)
-	    probs = knn.predict_proba(test_data)
-	else:
+                        label_encoder, classifier='knn', k=5):
+	"""
+	This function classifies all candidate roofs within an image and
+	returns the predicted labels and classification probabilities.
+	:param train_data: Training data
+	:param train_labels: Training labels
+	:param test_data: Test data
+	:param label_encoder: Encoder to convert class predictions to labels
+	:param classifier: Type of classifier to use, default is knn
+	:param neighbors: Number of neighbors for knn classifier
+	:returns: Predicted labels and classification probabilities
+	"""
+	if classifier == 'forest':
+		# Create and fit a random forest classifier
+		forest = ensemble.RandomForestClassifier(random_state=0,
+												class_weight='auto')
+		# Train on training observations
+		forest.fit(train_data, train_labels)
+		# Predict labels for test set
+		predictions = forest.predict(test_data)
+		labels = label_encoder.inverse_transform(predictions)
+		probs = forest.predict_proba(test_data)
+	elif classifier == 'svm':
 		# Create and fit svm
 		svc = svm.SVC(kernel='linear')
 		# Train on training observations
@@ -254,8 +254,18 @@ def classify_candidates(train_data, train_labels, test_data,
 		predictions = svc.predict(test_data)
 		labels = label_encoder.inverse_transform(predictions)
 		probs = None
+	else:
+		# Create and fit a nearest neighbors classifier
+		knn = neighbors.KNeighborsClassifier(n_neighbors=k)
+		# Train on training observations
+		knn.fit(train_data, train_labels)
+		# Predict labels for test set
+		predictions = knn.predict(test_data)
+		labels = label_encoder.inverse_transform(predictions)
+		probs = knn.predict_proba(test_data)
 
-    return (predictions, labels, probs)
+
+	return (predictions, labels, probs)
 
 
 def annotate_results(image_fn, centroids, predictions, labels):
@@ -288,7 +298,7 @@ def annotate_results(image_fn, centroids, predictions, labels):
 
 
 def classify_image(image_fn, template_fn, image_data_fn, out_fn=None,
-                   use_color=True, use_hog=True, use_mag=True,
+                   classifier='knn', use_color=True, use_hog=True, use_mag=True,
                    thresh=0.05, color_rad=15, hog_rad=32, k=3,
                    display=False):
     """
@@ -300,6 +310,7 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn=None,
     :param template_fn: Path of template used to find candidates
     :param image_data_fn: Path of csv containing training data
     :param out_fn: Path of output image
+    :param classifier: The type of classifier to use, default is knn
     :param use_color: Use color histogram for classification
     :param use_hog: Use histogram of oriented gradients
     :param use_mag: Use gradient magnitudes
@@ -336,7 +347,7 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn=None,
         # Classify candidates
         (predictions, labels, probs) = classify_candidates(train_data,
                                              train_labels, test_data,
-                                             label_encoder, k)
+                                             label_encoder, classifier, k)
         
         # Annotate and display candidate classification results
         image = annotate_results(image_fn, centroids, predictions,
@@ -385,7 +396,7 @@ def classify_image(image_fn, template_fn, image_data_fn, out_fn=None,
 
 
 def batch_classify(in_dir, out_dir, template_fn, image_data_fn,
-                   use_color=True, use_hog=True, use_mag=True,
+                   classifier='knn', use_color=True, use_hog=True, use_mag=True,
                    thresh=0.05, color_rad=15, hog_rad=32, k=3):
     """
     This function classifies all images in the input directory and
@@ -394,6 +405,7 @@ def batch_classify(in_dir, out_dir, template_fn, image_data_fn,
     :param out_dir: Output directory
     :param template_fn: Path of template used to find candidates
     :param image_data_fn: Path of csv containing training data
+    :param classifier: The type of classifier to use, default is knn
     :param use_color: Use color histogram for classification
     :param use_hog: Use histogram of oriented gradients
     :param use_mag: Use gradient magnitudes
@@ -427,7 +439,7 @@ def batch_classify(in_dir, out_dir, template_fn, image_data_fn,
     for image_fn in glob.glob(in_dir + '*'):
         out_fn = out_dir + str(count) + suffix + '.png'
         classify_image(image_fn, template_fn, image_data_fn, out_fn,
-                       use_color, use_hog, use_mag, thresh, color_rad,
+                       classifier, use_color, use_hog, use_mag, thresh, color_rad,
                        hog_rad, k)
         count += 1
     
@@ -435,3 +447,177 @@ def batch_classify(in_dir, out_dir, template_fn, image_data_fn,
     print 'Classified {} images in {} seconds.'.format(count,
                                                       (t_end - t_start))
 
+
+def hog_classify(image_fn, hog_data_fn, centroids, predictions, labels,
+                 hog_rad=32, k=3):
+    """
+    This function classifies all candidate roofs found by the color
+    histogram classifier. It returns the updated labels and predictions.
+    :param image_fn: Path of input image
+    :param hog_data_fn: Path of csv containing training data
+    :param centroids: Candidate centroids
+    :param predictions: Color histogram predictions [0-3]
+    :param labels: Color histogram class labels
+    :param hog_rad: Radius for computing hog features
+    :param k: Number of neighbors for knn classifier
+    :returns: Updated predictions [0-4] and class labels
+    """
+        
+    # Get training data
+    use_color = False
+    use_hog = True
+    use_mag = True
+    (train_data, train_labels, label_encoder) = get_training_data(
+                            hog_data_fn, use_color, use_hog, use_mag)
+
+    # Get test data
+    test_data = get_test_data(image_fn, centroids, use_color,
+                              use_hog, use_mag, hog_rad)
+
+    # Classify candidates
+    classifier = 'forest'
+    (hog_predictions, hog_labels, hog_probs) = classify_candidates(
+                                 train_data, train_labels, test_data,
+                                 label_encoder, classifier, k)
+    
+    # Update predictions and labels
+    for i in range(predictions.shape[0]):
+        if labels[i] == 'roof':
+            if hog_labels[i] == 'nonroof':
+                labels[i] = 'nonroof'
+                predictions[i] = 4
+    
+    return (predictions, labels)
+
+
+def two_step_classify_image(image_fn, template_fn, image_data_fn,
+                   hog_data_fn, out_fn=None, thresh=0.05, color_rad=15,
+                   hog_rad=32, k=3, display=False):
+    """
+    This function classifies all candidate roofs within an image and
+    saves a labeled version of the original image. It first finds
+    candidates using template matching and classifies those, then uses
+    the candidates classified as roofs as new candidates for another
+    round of classification. It returns the candidate centroid
+    locations, predicted labels, and classification probabilities.
+    :param image_fn: Path of input image
+    :param template_fn: Path of template used to find candidates
+    :param image_data_fn: Path of csv containing training data
+    :param hog_data_fn: Path of csv containing hog training data
+    :param out_fn: Path of output image
+    :param thresh: Threshold value for template matching
+    :param color_rad: Radius for computing color histogram
+    :param hog_rad: Radius for computing hog features
+    :param k: Number of neighbors for knn classifier
+    :param display: Choose True to display plots
+    :returns: Candidate centroids, predicted label, and classification
+    probabilities
+    """
+    # Template match, threshold, and segment
+    markers, num_markers = find_markers(image_fn, template_fn)
+    if display:
+        plt.figure()
+        plt.imshow(markers)
+        plt.show()
+
+    # If at least one candidate is found
+    if num_markers > 1:
+        
+        # Find centroids
+        centroids = find_centroids(markers, num_markers)
+        
+        # Get training data
+        use_color = True
+        use_hog = False
+        use_mag = False
+        (train_data, train_labels, label_encoder) = \
+                    get_training_data(image_data_fn, use_color,
+                                      use_hog, use_mag)
+        
+        # Get test data
+        test_data = get_test_data(image_fn, centroids, use_color,
+                                  use_hog, use_mag)
+        
+        # Classify candidates
+        (predictions, labels, probs) = classify_candidates(train_data,
+                                             train_labels, test_data,
+                                             label_encoder, k)
+        
+        # Stage 2 classification
+        # If nonroof, change prediction to 4, label to 'nonroof'
+        (predictions, labels) = hog_classify(image_fn, hog_data_fn,
+                                            centroids, predictions,
+                                            labels, hog_rad, k)
+        
+        # Annotate and display candidate classification results
+        image = annotate_results(image_fn, centroids, predictions,
+                                 labels)
+        
+        # Display classification results
+        if display:
+            # Load image for display
+            converted_image = Image.open(image_fn).convert('P')
+            # Colors and weights for each class
+            colors = ['m', 'r', 'g', 'b', 'c']
+            weights = ['normal', 'bold', 'normal', 'normal', 'normal']
+            # Annotate plot for display
+            plt.figure()
+            plt.imshow(converted_image)
+            for i in range(centroids.shape[0]):
+                plt.plot(centroids[i,1], centroids[i,0], 'o',
+                         color=colors[predictions[i]])
+                plt.text(centroids[i,1], centroids[i,0], labels[i],
+                         color=colors[predictions[i]], fontsize=15,
+                         fontweight=weights[predictions[i]])
+            plt.xlim(0,400)
+            plt.ylim(0,400)
+            plt.gca().invert_yaxis()
+            plt.show()
+        
+    # If no candidates are found
+    else:
+        centroids = None
+        labels = None
+        probs = None
+        if display:
+            # Load image for display
+            converted_image = Image.open(image_fn).convert('P')
+            plt.figure()
+            plt.imshow(converted_image)
+            plt.show()
+        # Load input image
+        image = cv2.imread(image_fn)
+    
+    # Write output image
+    if out_fn is not None:
+        cv2.imwrite(out_fn, image)
+    
+    return (centroids, labels, probs)
+
+
+def two_step_batch_classify(in_dir, out_dir, template_fn, image_data_fn,
+							hog_data_fn):
+	"""
+	This function classifies all images in the input directory and
+	saves annotated output images in the output directory.
+	:param in_dir: Input directory
+	:param out_dir: Output directory
+	:param template_fn: Path of template used to find candidates
+	:param image_data_fn: Path of csv containing color training data
+	:param hog_data_fn: Path of csv containing hog training data
+	"""
+	t_start = time.time()
+	count = 0
+	suffix = '_twostep'
+
+	for image_fn in glob.glob(in_dir + '*'):
+		out_fn = out_dir + str(count) + suffix + '.png'
+		(centroids, labels, probs) = two_step_classify_image(image_fn,
+									template_fn, image_data_fn, hog_data_fn, 
+									out_fn, thresh=0.05, color_rad=15,
+									hog_rad=30, k=5, display=False)
+		count += 1
+
+	t_end = time.time()
+	print 'Classified {} images in {} seconds.'.format(count,
+												(t_end - t_start))
