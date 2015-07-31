@@ -8,6 +8,67 @@ from sklearn import preprocessing
 from PIL import Image
 import matplotlib.pyplot as plt
 from features import *
+import urllib
+
+
+def sample_image(out_fn, lat, lon, height=400, width=400, zoom=19):
+    """
+    This function uses the Google Static Maps API to download and save
+    one satellite image.
+    :param out_fn: Output filename for saved image
+    :param lat: Latitude of image center
+    :param lon: Longitude of image center
+    :param height: Height of image in pixels
+    :param width: Width of image in pixels
+    :param zoom: Zoom level of image
+    """
+    # Google Static Maps API key
+    api_key = 'AIzaSyAejgapvGncLMRiMlUoqZ2h6yRF-lwNYMM'
+    
+    # Save satellite image
+    url_pattern = 'https://maps.googleapis.com/maps/api/staticmap?center=%0.6f,%0.6f&zoom=%s&size=%sx%s&maptype=satellite&key=%s'
+    url = url_pattern % (lat, lon, zoom, height, width, api_key)
+    urllib.urlretrieve(url, out_fn)
+
+
+def sample_dhs(image_data, cell_id, cell_lat, cell_lon, samples,
+               out_dir):
+    """
+    This function samples multiple images at random for a DHS location
+    and saves them in the output directory.
+    :param image_data: DataFrame containing image metadata
+    :param cell_id: Cell ID of DHS location
+    :param cell_lat: Latitude of DHS location
+    :param cell_lon: Longitude of DHS location
+    :param samples: Number of samples to get
+    :param out_dir: Directory for sampled images
+    :returns: DataFrame containing updated image metadata
+    """
+    t_start = time.time()
+    
+    # Sample images
+    for i in range(samples):
+        # Randomly sample within half-degree cell
+        lat = cell_lat + np.random.uniform(-0.25, 0.25)
+        lon = cell_lon + np.random.uniform(-0.25, 0.25)
+        # Determine output filename
+        fn = str(cell_id) + '_' + str(i) + '.png'
+        out_fn = out_dir + fn
+        # Save image
+        sample_image(out_fn, lat, lon)
+        # Update image metadata
+        temp_data = pd.DataFrame({'image': [fn], 'cellid': [cell_id],
+                                 'cell_lat': [cell_lat], 'cell_lon': 
+                                 [cell_lon], 'lat': [lat], 'lon': 
+                                 [lon]})
+        image_data = pd.concat([image_data, temp_data])
+    
+    # Return updated image metadata
+    t_end = time.time()
+    print 'Sampled {} images from DHS cell {} in {} seconds.'.format(
+                                                    samples, cell_id,
+                                                    (t_end - t_start))
+    return image_data
 
 
 def display_image(imageFn):

@@ -72,8 +72,8 @@ def compute_gradient(channel):
     vert_kernel = np.array([[-1], [0], [1]])
     
     # Compute horizontal and vertical components of gradient
-    horiz = filters.convolve(channel, horiz_kernel, mode='reflect')
-    vert = filters.convolve(channel, vert_kernel, mode='reflect')
+    horiz = filters.convolve(channel, horiz_kernel, mode='nearest')
+    vert = filters.convolve(channel, vert_kernel, mode='nearest')
     
     # Create arrays for magnitude and direction
     magnitude = np.zeros(channel.shape)
