@@ -21,14 +21,29 @@ def sample_image(out_fn, lat, lon, height=400, width=400, zoom=19):
     :param height: Height of image in pixels
     :param width: Width of image in pixels
     :param zoom: Zoom level of image
+    :return: True if valid image saved, False if no image saved
     """
     # Google Static Maps API key
     api_key = 'AIzaSyAejgapvGncLMRiMlUoqZ2h6yRF-lwNYMM'
     
-    # Save satellite image
+    # Save extra tall satellite image
+    height_buffer = 100
     url_pattern = 'https://maps.googleapis.com/maps/api/staticmap?center=%0.6f,%0.6f&zoom=%s&size=%sx%s&maptype=satellite&key=%s'
-    url = url_pattern % (lat, lon, zoom, height, width, api_key)
+    url = url_pattern % (lat, lon, zoom, width, height + height_buffer, api_key)
     urllib.urlretrieve(url, out_fn)
+
+    # Cut out text at the bottom of the image
+    image = cv2.imread(out_fn)
+    image = image[(height_buffer/2):(height+height_buffer/2),:,:]
+    cv2.imwrite(out_fn, image)
+
+    # Check file size and delete invalid images < 10kb
+    fs = os.stat(out_fn).st_size
+    if fs < 10000:
+        os.remove(out_fn)
+        return False
+    else:
+        return True
 
 
 def sample_dhs(image_data, cell_id, cell_lat, cell_lon, samples,
@@ -47,21 +62,24 @@ def sample_dhs(image_data, cell_id, cell_lat, cell_lon, samples,
     t_start = time.time()
     
     # Sample images
-    for i in range(samples):
+    count = 0
+    while count < samples:
         # Randomly sample within half-degree cell
         lat = cell_lat + np.random.uniform(-0.25, 0.25)
         lon = cell_lon + np.random.uniform(-0.25, 0.25)
         # Determine output filename
-        fn = str(cell_id) + '_' + str(i) + '.png'
+        fn = str(cell_id) + '_' + str(count) + '.png'
         out_fn = out_dir + fn
         # Save image
-        sample_image(out_fn, lat, lon)
-        # Update image metadata
-        temp_data = pd.DataFrame({'image': [fn], 'cellid': [cell_id],
-                                 'cell_lat': [cell_lat], 'cell_lon': 
-                                 [cell_lon], 'lat': [lat], 'lon': 
-                                 [lon]})
-        image_data = pd.concat([image_data, temp_data])
+        check_image = sample_image(out_fn, lat, lon)
+        if check_image:
+            # Update image metadata
+            temp_data = pd.DataFrame({'image': [fn], 'cellid': [cell_id],
+                                     'cell_lat': [cell_lat], 'cell_lon': 
+                                     [cell_lon], 'lat': [lat], 'lon': 
+                                     [lon]})
+            image_data = pd.concat([image_data, temp_data])
+            count += 1
     
     # Return updated image metadata
     t_end = time.time()
@@ -287,13 +305,14 @@ def import_image_data(csv_in, display=False):
 """
 
 
-def process_image(image_path, class_name, image_data):
+def process_image(image_path, class_name, image_data, hog_type='advanced'):
     """
     This function process one image and adds its data to the dataframe
     containing all of the training image data.
     :param image_path: Path to image to process
     :param class_name: Class of image sample
     :param image_data: Dataframe containing training data
+    :param hog_type: Advanced computes sub-patch features as well
     :returns: Dataframe containing new image data
     """
     # Get image basename with extension
@@ -315,7 +334,10 @@ def process_image(image_path, class_name, image_data):
     color_df.columns = new_names
     
     # Calculate hog and gradient magnitude features
-    (hog, hog_bins, mag, mag_bins, max_mag) = compute_hog(image)
+    if hog_type == 'advanced':
+        (hog, mag) = compute_advanced_hog(image)
+    else:
+        (hog, hog_bins, mag, mag_bins, max_mag) = compute_hog(image)
     hog = hog.reshape(1, hog.size)
     mag = mag.reshape(1, mag.size)
     # Create hog dataframe
@@ -355,8 +377,8 @@ def store_image_data(image_dir, csv_out):
     # Setting column names of dataframe
     columns = ['class', 'imageID', 'filename', 'width', 'height']
     columns = columns + ['color' + str(i + 1) for i in range(48)]
-    columns = columns + ['hog' + str(i + 1) for i in range(9)]
-    columns = columns + ['mag' + str(i + 1) for i in range(16)]
+    columns = columns + ['hog' + str(i + 1) for i in range(9*5)]
+    columns = columns + ['mag' + str(i + 1) for i in range(16*5)]
     
     # Create data frame for image data
     image_data = pd.DataFrame(columns=columns)
@@ -376,6 +398,10 @@ def store_image_data(image_dir, csv_out):
                                        image_data)
             count_total += 1
             count_class += 1
+            # Print update for every 100 images
+            if count_class % 100 == 0:
+                print 'Processed {} images for {} class.'.format(count_class,\
+                                                         class_name)
         # Print update for class
         print 'Processed {} images for {} class.'.format(count_class,\
                                                          class_name)
@@ -427,10 +453,10 @@ def import_image_data(csv_in, display=False):
     color_columns = ['color' + str(i+1) for i in range(48)]
     colors = image_data.as_matrix(columns=color_columns)
     # Get hog vectors
-    hog_columns = ['hog' + str(i+1) for i in range(9)]
+    hog_columns = ['hog' + str(i+1) for i in range(9*5)]
     hogs = image_data.as_matrix(columns=hog_columns)
     # Get gradient magnitude vectors
-    mag_columns = ['mag' + str(i+1) for i in range(16)]
+    mag_columns = ['mag' + str(i+1) for i in range(16*5)]
     mags = image_data.as_matrix(columns=mag_columns)
     # Join into all features vectors
     all_columns = color_columns + hog_columns + mag_columns

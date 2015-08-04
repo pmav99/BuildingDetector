@@ -93,7 +93,8 @@ def compute_gradient(channel):
 def compute_hog(image_patch, normalize=True):
     """
     This function takes an image patch as input and returns a 9-element
-    vector containing the histogram of oriented gradients.
+    vector containing the histogram of oriented gradients and a 16-element
+    vector containing the histogram of gradient magnitudes.
     :param image_patch: The image patch on which to compute the HOG
     :returns: The HOG feature vector, the edges of the bins, and the max magnitude array
     """
@@ -133,7 +134,50 @@ def compute_hog(image_patch, normalize=True):
     if normalize:
         magnitude_hist = magnitude_hist.astype(float) / sum(magnitude_hist)
 
+    # Replace nan values with 0
+    hog = np.nan_to_num(hog)
+    magnitude_hist = np.nan_to_num(magnitude_hist)
+
     return (hog, hog_bins, magnitude_hist, magnitude_bins, max_magnitude)
+
+
+def compute_advanced_hog(image_patch, normalize=True, divisions=2):
+    """
+    This function takes an image patch as input and returns full-patch
+    and partial-patch HOG and gradient magnitude vectors.
+    :param image_patch: The image patch on which to compute the features
+    :param normalize: Normalizes the histograms before returning them
+    :param divisions: The number of divisions to make in each dimension
+    :returns: Full HOG and gradient magnitude vectors
+    """
+    # Getting size of image patch
+    height = image_patch.shape[0]
+    width = image_patch.shape[1]
+
+    # Compute full-patch HOG and gradient magnitudes
+    (hog, hog_bins, magnitude_hist, magnitude_bins, max_magnitude) = \
+                    compute_hog(image_patch)
+
+    # Split patch into equal size patches, add features from each
+    h_patch = height / divisions
+    w_patch = width / divisions
+    for i in range(divisions):
+        for j in range(divisions):
+            patch_ij = image_patch[i*h_patch:(i+1)*h_patch,
+                                   j*w_patch:(j+1)*w_patch,:]
+            # Compute sub-patch features
+            (hog_ij, hog_bins_ij, magnitude_hist_ij, magnitude_bins_ij,
+             max_magnitude_ij) = compute_hog(patch_ij)
+            # Concatenate with full-patch features
+            hog = np.concatenate((hog, hog_ij), axis=1)
+            magnitude_hist = np.concatenate((magnitude_hist,
+                                            magnitude_hist_ij), axis=1)
+
+    # Replace nan values with 0
+    hog = np.nan_to_num(hog)
+    magnitude_hist = np.nan_to_num(magnitude_hist)
+    
+    return (hog, magnitude_hist)
 
 
 def plot_hist(hist, bin_edges, title='Histogram'):
