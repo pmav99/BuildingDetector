@@ -263,9 +263,101 @@ def append_image_data(class_name, image_dir, csv_in, csv_out=None):
     imageData.to_csv(csv_out)
     print 'Wrote data for {} images to csv.'.format(imageData.shape[0])
 
-"""
+
+def process_image(image_path, class_name, image_data, hog_type='advanced'):
+    """
+    This function process one image and adds its data to the dataframe
+    containing all of the training image data.
+    :param image_path: Path to image to process
+    :param class_name: Class of image sample
+    :param image_data: Dataframe containing training data
+    :param hog_type: Advanced computes sub-patch features as well
+    :returns: Dataframe containing new image data
+    """
+    # Get image basename with extension
+    image_fn = os.path.basename(image_path)
+    # Get image ID
+    imageID = image_fn[:-4]
+    
+    # Read in image and get dimensions
+    image = cv2.imread(image_path)
+    h, w = image.shape[:2]
+    
+    # Compute features
+    features = compute_features(image)
+    features = features.reshape(1, features.size)
+    # Create features dataframe
+    features_df = pd.DataFrame(features)
+    feature_names = ['color' + str(i + 1) for i in range(48)]
+    feature_names = feature_names + ['hog' + str(i + 1) for i in range(324)]
+    features_df.columns = feature_names
+
+    # Create dataframe for image
+    img_data = pd.DataFrame({'class': [class_name], 'imageID': [imageID],
+        'filename': [image_fn], 'width': [w], 'height': [h]})
+    img_data = pd.concat([img_data, features_df], axis=1)
+    
+    # Add new image data to image dataframe and continue indexing
+    return image_data.append(img_data, ignore_index=True)
+
+
+def store_image_data(image_dir, csv_out):
+    """
+    This function goes through each of the class sample directories
+    within the samples directory and computes color histogram and HOG
+    features for each image within, then writes the data to a csv file
+    for later use.
+    :param image_dir: Path to the directory containing image samples
+    :param csv_out: Path of output csv file containing data
+    """
+    start_time = time.time()
+    
+    # Setting column names of dataframe
+    columns = ['class', 'imageID', 'filename', 'width', 'height']
+    columns = columns + ['color' + str(i + 1) for i in range(48)]
+    columns = columns + ['hog' + str(i + 1) for i in range(324)]
+    
+    # Create data frame for image data
+    image_data = pd.DataFrame(columns=columns)
+    
+    # Keep track of total images processed
+    count_total = 0
+    
+    # Search sample directory for all sample class subdirectories
+    for class_dir in glob.iglob(image_dir + '*'):
+        # Get class name
+        class_name = os.path.basename(class_dir)
+        # Add data for each image in class subdirectory
+        count_class = 0
+        check0_time = time.time()
+        for image_path in glob.iglob(class_dir + '/*.png'):
+            # Add data for each image
+            image_data = process_image(image_path, class_name, image_data)
+            count_total += 1
+            count_class += 1
+            # Print update for every 100 images
+            if count_class % 100 == 0:
+                print 'Processed {} images for {} class.'.format(count_class,
+                    class_name)
+        # Print update for class
+        check1_time = time.time()
+        print 'Processed {} images for {} class in {} seconds.'.format(
+            count_class,class_name,(check1_time-check0_time))
+        check0_time = check1_time
+    
+    # Drop rows with duplicated information
+    image_data.drop_duplicates(['class', 'filename'], inplace=True)
+    # Reorganize columns
+    image_data = image_data[columns]
+    # Writing image data to csv
+    image_data.to_csv(csv_out)
+    end_time = time.time()
+    print 'Processed {} images total in {} seconds.'.format(count_total,
+        (end_time - start_time))
+
+
 def import_image_data(csv_in, display=False):
-    """"""
+    """
     This function reads image data from a csv file and returns Numpy
     arrays containing the image features and the image labels so that
     the data is ready for use. It also returns a label encoder so that
@@ -273,36 +365,97 @@ def import_image_data(csv_in, display=False):
     encodings.
     :param csv_in: Path of csv file containing image data
     :param display: Print out updates
-    :returns: Image feature vectors, image labels, and label encoder
-    """"""
+    :returns: All features vectors, color histogram vectors, HOG vectors,
+    image labels, and label encoder
+    """
     # Loading image data from csv
-    imageData = pd.read_csv(csv_in)
+    image_data = pd.read_csv(csv_in)
     # Need to convert imageIDs to strings (some get converted to ints)
-    imageData.imageID = imageData.imageID.astype(str)
+    image_data.imageID = image_data.imageID.astype(str)
     # Drop first column
-    imageData.drop('Unnamed: 0', axis=1, inplace=True)
+    image_data.drop('Unnamed: 0', axis=1, inplace=True)
     # Get class labels
-    labels = imageData.as_matrix(columns=['class'])
+    labels = image_data.as_matrix(columns=['class'])
     # Making 2D array into 1D array
     labels = labels.flatten()
     # Encode labels with value between 0 and n_classes-1
-    le = preprocessing.LabelEncoder()
-    # roof = 0, water = 2, vegetation = 1
-    le.fit(labels)
+    label_encoder = preprocessing.LabelEncoder()
+    # dirt = 0, roof = 1, vegetation = 2, water = 3
+    label_encoder.fit(labels)
     if display:
-        print le.classes_ # displays the set of classes
-    labels = le.transform(labels)
+        print label_encoder.classes_ # displays the set of classes
+    labels = label_encoder.transform(labels)
     if display:
         print 'Got class labels for {} training data points.'.format\
               (labels.shape[0])
     # Get color histograms
-    bins = ['hist' + str(i+1) for i in range(48)]
-    hists = imageData.as_matrix(columns=bins)
+    color_columns = ['color' + str(i+1) for i in range(48)]
+    colors = image_data.as_matrix(columns=color_columns)
+    # Get hog vectors
+    hog_columns = ['hog' + str(i+1) for i in range(324)]
+    hogs = image_data.as_matrix(columns=hog_columns)
+    # Join into all features vectors
+    all_columns = color_columns + hog_columns
+    features = image_data.as_matrix(columns=all_columns)
     if display:
-        print 'Got feature vector for {} training data points.'.format\
-              (hists.shape[0])
-    return (hists, labels, le)
-"""
+        print 'Got feature vectors for {} training data points.'.format\
+              (features.shape[0])
+    return (features, colors, hogs, labels, label_encoder)
+
+
+
+
+
+
+'''
+def import_image_data(csv_in, display=False):
+    """
+    This function reads image data from a csv file and returns Numpy
+    arrays containing the image features and the image labels so that
+    the data is ready for use. It also returns a label encoder so that
+    we can go back and forth between class string labels and integer
+    encodings.
+    :param csv_in: Path of csv file containing image data
+    :param display: Print out updates
+    :returns: All features vectors, color histogram vectors, HOG vectors,
+    gradient magnitude vectors, image labels, and label encoder
+    """
+    # Loading image data from csv
+    image_data = pd.read_csv(csv_in)
+    # Need to convert imageIDs to strings (some get converted to ints)
+    image_data.imageID = image_data.imageID.astype(str)
+    # Drop first column
+    image_data.drop('Unnamed: 0', axis=1, inplace=True)
+    # Get class labels
+    labels = image_data.as_matrix(columns=['class'])
+    # Making 2D array into 1D array
+    labels = labels.flatten()
+    # Encode labels with value between 0 and n_classes-1
+    label_encoder = preprocessing.LabelEncoder()
+    # dirt = 0, roof = 1, vegetation = 2, water = 3
+    label_encoder.fit(labels)
+    if display:
+        print label_encoder.classes_ # displays the set of classes
+    labels = label_encoder.transform(labels)
+    if display:
+        print 'Got class labels for {} training data points.'.format\
+              (labels.shape[0])
+    # Get color histograms
+    color_columns = ['color' + str(i+1) for i in range(48)]
+    colors = image_data.as_matrix(columns=color_columns)
+    # Get hog vectors
+    hog_columns = ['hog' + str(i+1) for i in range(9*17)]
+    hogs = image_data.as_matrix(columns=hog_columns)
+    # Get gradient magnitude vectors
+    mag_columns = ['mag' + str(i+1) for i in range(16*17)]
+    mags = image_data.as_matrix(columns=mag_columns)
+    # Join into all features vectors
+    all_columns = color_columns + hog_columns + mag_columns
+    features = image_data.as_matrix(columns=all_columns)
+    if display:
+        print 'Got feature vectors for {} training data points.'.format\
+              (features.shape[0])
+    return (features, colors, hogs, mags, labels, label_encoder)
 
 
 def process_image(image_path, class_name, image_data, hog_type='advanced'):
@@ -377,8 +530,8 @@ def store_image_data(image_dir, csv_out):
     # Setting column names of dataframe
     columns = ['class', 'imageID', 'filename', 'width', 'height']
     columns = columns + ['color' + str(i + 1) for i in range(48)]
-    columns = columns + ['hog' + str(i + 1) for i in range(9*5)]
-    columns = columns + ['mag' + str(i + 1) for i in range(16*5)]
+    columns = columns + ['hog' + str(i + 1) for i in range(9*17)]
+    columns = columns + ['mag' + str(i + 1) for i in range(16*17)]
     
     # Create data frame for image data
     image_data = pd.DataFrame(columns=columns)
@@ -415,53 +568,4 @@ def store_image_data(image_dir, csv_out):
     end_time = time.time()
     print 'Processed {} images total in {} seconds.'.format(count_total,\
                                                 (end_time - start_time))
-
-
-def import_image_data(csv_in, display=False):
-    """
-    This function reads image data from a csv file and returns Numpy
-    arrays containing the image features and the image labels so that
-    the data is ready for use. It also returns a label encoder so that
-    we can go back and forth between class string labels and integer
-    encodings.
-    :param csv_in: Path of csv file containing image data
-    :param display: Print out updates
-    :returns: All features vectors, color histogram vectors, HOG vectors,
-    gradient magnitude vectors, image labels, and label encoder
-    """
-    # Loading image data from csv
-    image_data = pd.read_csv(csv_in)
-    # Need to convert imageIDs to strings (some get converted to ints)
-    image_data.imageID = image_data.imageID.astype(str)
-    # Drop first column
-    image_data.drop('Unnamed: 0', axis=1, inplace=True)
-    # Get class labels
-    labels = image_data.as_matrix(columns=['class'])
-    # Making 2D array into 1D array
-    labels = labels.flatten()
-    # Encode labels with value between 0 and n_classes-1
-    label_encoder = preprocessing.LabelEncoder()
-    # dirt = 0, roof = 1, vegetation = 2, water = 3
-    label_encoder.fit(labels)
-    if display:
-        print label_encoder.classes_ # displays the set of classes
-    labels = label_encoder.transform(labels)
-    if display:
-        print 'Got class labels for {} training data points.'.format\
-              (labels.shape[0])
-    # Get color histograms
-    color_columns = ['color' + str(i+1) for i in range(48)]
-    colors = image_data.as_matrix(columns=color_columns)
-    # Get hog vectors
-    hog_columns = ['hog' + str(i+1) for i in range(9*5)]
-    hogs = image_data.as_matrix(columns=hog_columns)
-    # Get gradient magnitude vectors
-    mag_columns = ['mag' + str(i+1) for i in range(16*5)]
-    mags = image_data.as_matrix(columns=mag_columns)
-    # Join into all features vectors
-    all_columns = color_columns + hog_columns + mag_columns
-    features = image_data.as_matrix(columns=all_columns)
-    if display:
-        print 'Got feature vectors for {} training data points.'.format\
-              (features.shape[0])
-    return (features, colors, hogs, mags, labels, label_encoder)
+'''

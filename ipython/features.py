@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from scipy.ndimage import filters
+import skimage.color
+import skimage.feature
+
 
 def calc_color_hist(image, bins=16, norm=True):
     """
@@ -47,48 +50,50 @@ def plot_color_hist(image, bins=16, norm=True):
     plt.show()
 
 
-def cart2pol(x, y):
+def compute_hog(image_patch):
     """
-    This function converts from cartesian to polar coordinates.
-    :param x: Cartesian x coordinate
-    :param y: Cartesian y coordinate
-    :returns: Magnitude and direction as a 2-tuple
+    This function takes an image patch as input and returns a 576-element HOG
+    feature vector.
+    :param image_patch: Input image patch
+    :returns: HOG feature vector
     """
-    rho = np.sqrt(x**2 + y**2)
-    phi = np.arctan2(y, x)
-    return (rho, phi)
+    gray_patch = skimage.color.rgb2gray(image_patch)
+    hog = skimage.feature.hog(gray_patch, orientations=9, pixels_per_cell=(20,20),
+        cells_per_block=(2,2), visualise=False)
+    return hog
 
 
-def compute_gradient(channel):
+def plot_hist(hist, bin_edges, title='Histogram'):
     """
-    This function computes the gradient magnitudes and directions for one
-    channel of an image patch.
-    :param channel: One channel of an image patch
-    :returns: Magnitude and direction arrays of the same dimensions as the
-    input channel of the image patch
+    This function plots a histogram.
+    :param hist: The histogram vector
+    :param bin_edges: The histogram bin edge values
     """
-    # Convolution kernels, directions will start from 0 at x-axis going counterclockwise (standard)
-    horiz_kernel = np.array([[1, 0, -1]])
-    vert_kernel = np.array([[-1], [0], [1]])
-    
-    # Compute horizontal and vertical components of gradient
-    horiz = filters.convolve(channel, horiz_kernel, mode='nearest')
-    vert = filters.convolve(channel, vert_kernel, mode='nearest')
-    
-    # Create arrays for magnitude and direction
-    magnitude = np.zeros(channel.shape)
-    direction = np.zeros(channel.shape)
-    
-    # Compute magnitude and direction for gradient at each pixel
-    for i in range(channel.shape[0]):
-        for j in range(channel.shape[1]):
-            magnitude[i,j], direction[i,j] = cart2pol(horiz[i,j], vert[i,j])
-            # Converting angles to degrees and taking modulo 180
-            direction[i,j] = np.rad2deg(direction[i,j]) % 180
-    
-    # Return computed gradient
-    return (magnitude, direction)
+    plt.bar(bin_edges[:-1], hist, width=(bin_edges[1] - bin_edges[0]))
+    plt.title(title)
+    plt.xlabel('Bins')
+    plt.ylabel('Frequency')
+    plt.show()
 
+
+def compute_features(patch):
+    """
+    This function computes features for an image patch.
+    :param patch: 80x80 image patch
+    :returns: Feature vector
+    """
+    color = calc_color_hist(patch)
+    color = color.flatten()
+    hog = compute_hog(patch)
+    features = np.concatenate((color, hog), axis=0)
+    return features
+
+
+
+
+
+'''
+DEPRECATED CODE
 
 def compute_hog(image_patch, normalize=True):
     """
@@ -141,7 +146,7 @@ def compute_hog(image_patch, normalize=True):
     return (hog, hog_bins, magnitude_hist, magnitude_bins, max_magnitude)
 
 
-def compute_advanced_hog(image_patch, normalize=True, divisions=2):
+def compute_advanced_hog(image_patch, normalize=True, divisions=4):
     """
     This function takes an image patch as input and returns full-patch
     and partial-patch HOG and gradient magnitude vectors.
@@ -161,7 +166,7 @@ def compute_advanced_hog(image_patch, normalize=True, divisions=2):
     # Split patch into equal size patches, add features from each
     h_patch = height / divisions
     w_patch = width / divisions
-    for i in range(divisions):
+    for i in range(divisions):  
         for j in range(divisions):
             patch_ij = image_patch[i*h_patch:(i+1)*h_patch,
                                    j*w_patch:(j+1)*w_patch,:]
@@ -180,14 +185,45 @@ def compute_advanced_hog(image_patch, normalize=True, divisions=2):
     return (hog, magnitude_hist)
 
 
-def plot_hist(hist, bin_edges, title='Histogram'):
+def cart2pol(x, y):
     """
-    This function plots a histogram.
-    :param hist: The histogram vector
-    :param bin_edges: The histogram bin edge values
+    This function converts from cartesian to polar coordinates.
+    :param x: Cartesian x coordinate
+    :param y: Cartesian y coordinate
+    :returns: Magnitude and direction as a 2-tuple
     """
-    plt.bar(bin_edges[:-1], hist, width=(bin_edges[1] - bin_edges[0]))
-    plt.title(title)
-    plt.xlabel('Bins')
-    plt.ylabel('Frequency')
-    plt.show()
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return (rho, phi)
+
+
+def compute_gradient(channel):
+    """
+    This function computes the gradient magnitudes and directions for one
+    channel of an image patch.
+    :param channel: One channel of an image patch
+    :returns: Magnitude and direction arrays of the same dimensions as the
+    input channel of the image patch
+    """
+    # Convolution kernels, directions will start from 0 at x-axis going counterclockwise (standard)
+    horiz_kernel = np.array([[1, 0, -1]])
+    vert_kernel = np.array([[-1], [0], [1]])
+    
+    # Compute horizontal and vertical components of gradient
+    horiz = filters.convolve(channel, horiz_kernel, mode='nearest')
+    vert = filters.convolve(channel, vert_kernel, mode='nearest')
+    
+    # Create arrays for magnitude and direction
+    magnitude = np.zeros(channel.shape)
+    direction = np.zeros(channel.shape)
+    
+    # Compute magnitude and direction for gradient at each pixel
+    for i in range(channel.shape[0]):
+        for j in range(channel.shape[1]):
+            magnitude[i,j], direction[i,j] = cart2pol(horiz[i,j], vert[i,j])
+            # Converting angles to degrees and taking modulo 180
+            direction[i,j] = np.rad2deg(direction[i,j]) % 180
+    
+    # Return computed gradient
+    return (magnitude, direction)
+'''
